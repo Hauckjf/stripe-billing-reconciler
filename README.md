@@ -47,7 +47,22 @@ _Examples coming with the first feature release._
 
 ## Architecture
 
-_High-level diagram and decision records in `docs/`._
+```mermaid
+flowchart LR
+    CLI --> ConfigLoader["Config loader"]
+    ConfigLoader --> StripeClient["StripeClient"]
+    StripeClient --> ChargesFetcher["ChargesFetcher"]
+    StripeClient --> EventsFetcher["EventsFetcher"]
+    ChargesFetcher --> Reconciler["Reconciler"]
+    SQLiteStore["SQLiteStore (orders)"] --> Reconciler
+    Reconciler --> DiscrepancyClassifier["DiscrepancyClassifier"]
+    DiscrepancyClassifier --> Formatter["Formatter"]
+    Formatter --> Output["stdout / file"]
+```
+
+The CLI parses flags and loads configuration (API key, date range, tolerance), then initialises a shared `StripeClient` that enforces the token-bucket rate limiter on every outbound request. `ChargesFetcher` and `EventsFetcher` pull Stripe data in cursor-paginated batches, checkpointing each cursor to SQLite so an interrupted run resumes exactly where it left off; simultaneously, `SQLiteStore` surfaces the internal orders rows for cross-referencing. The `Reconciler` joins Stripe records against orders by `stripe_charge_id`, then `DiscrepancyClassifier` buckets each pair into `matched`, `amount_mismatched`, or `unmatched` before `Formatter` serialises the final report to stdout or a file path.
+
+Architectural decision records live in [`docs/adr/`](docs/adr/).
 
 ## Definition of done
 
