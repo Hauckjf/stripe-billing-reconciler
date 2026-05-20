@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from stripe_reconciler.models import DiscrepancyKind, StripeCharge
-from stripe_reconciler.reconciler import reconcile
+from stripe_reconciler.models import DiscrepancyKind, LocalOrder, StripeCharge
+from stripe_reconciler.reconciler import build_detail, detect_duplicates, reconcile
 from stripe_reconciler.store import OrdersStore
 
 _NOW = datetime(2024, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -22,6 +22,15 @@ def _charge(charge_id: str, amount: int = 1000) -> StripeCharge:
         currency="usd",
         created=_NOW,
         status="succeeded",
+    )
+
+
+def _order(order_id: str, amount_cents: int, stripe_charge_id: str) -> LocalOrder:
+    return LocalOrder(
+        order_id=order_id,
+        amount_cents=amount_cents,
+        stripe_charge_id=stripe_charge_id,
+        created_at=_NOW,
     )
 
 
@@ -240,3 +249,147 @@ class TestCombinedScenario:
         d = result[0]
         assert d.charge_id == "ch_xyz"
         assert d.order_id == "ord_abc"
+
+
+class TestBuildDetail:
+    def test_amount_mismatch_contains_order_id_and_both_amounts(self) -> None:
+        charge = _charge("ch_001", 1450)
+        order = _order("ORD-123", 1500, "ch_001")
+        detail = build_detail(DiscrepancyKind.AMOUNT_MISMATCH, charge, order)
+        assert "ORD-123" in detail
+        assert "1500" in detail
+        assert "1450" in detail
+
+    def test_amount_mismatch_delta_is_stripe_minus_order(self) -> None:
+        charge = _charge("ch_001", 1450)
+        order = _order("ORD-123", 1500, "ch_001")
+        detail = build_detail(DiscrepancyKind.AMOUNT_MISMATCH, charge, order)
+        # delta = 1450 - 1500 = -50
+        assert "-50" in detail
+
+    def test_amount_mismatch_positive_delta_shown_with_sign(self) -> None:
+        charge = _charge("ch_001", 2000)
+        order = _order("ORD-456", 1500, "ch_001")
+        detail = build_detail(DiscrepancyKind.AMOUNT_MISMATCH, charge, order)
+        # delta = 2000 - 1500 = +500
+        assert "+500" in detail
+
+    def test_charge_not_in_orders_contains_charge_id(self) -> None:
+        charge = _charge("ch_orphan", 999)
+        detail = build_detail(DiscrepancyKind.CHARGE_NOT_IN_ORDERS, charge, None)
+        assert "ch_orphan" in detail
+
+    def test_order_not_in_stripe_contains_order_and_charge_refs(self) -> None:
+        order = _order("ord_ghost", 500, "ch_missing")
+        detail = build_detail(DiscrepancyKind.ORDER_NOT_IN_STRIPE, None, order)
+        assert "ord_ghost" in detail
+        assert "ch_missing" in detail
+
+    def test_duplicate_charge_id_contains_charge_id(self) -> None:
+        charge = _charge("ch_dup", 100)
+        detail = build_detail(DiscrepancyKind.DUPLICATE_CHARGE_ID, charge, None)
+        assert "ch_dup" in detail
+
+    def test_all_kinds_return_non_empty_string(self) -> None:
+        charge = _charge("ch_x", 500)
+        order = _order("ord_x", 500, "ch_x")
+        cases = [
+            (DiscrepancyKind.AMOUNT_MISMATCH, charge, order),
+            (DiscrepancyKind.CHARGE_NOT_IN_ORDERS, charge, None),
+            (DiscrepancyKind.ORDER_NOT_IN_STRIPE, None, order),
+            (DiscrepancyKind.DUPLICATE_CHARGE_ID, charge, None),
+        ]
+        for kind, c, o in cases:
+            assert build_detail(kind, c, o), f"detail must be non-empty for {kind}"
+
+
+class TestDuplicateDetection:
+    def test_no_duplicates_returns_empty(self) -> None:
+        charges = [_charge("ch_001"), _charge("ch_002"), _charge("ch_003")]
+        assert detect_duplicates(charges) == []
+
+    def test_two_charges_same_id_yields_one_discrepancy(self) -> None:
+        charges = [_charge("ch_dup", 1000), _charge("ch_dup", 1000)]
+        result = detect_duplicates(charges)
+        assert len(result) == 1
+        d = result[0]
+        assert d.kind == DiscrepancyKind.DUPLICATE_CHARGE_ID
+        assert d.charge_id == "ch_dup"
+        assert d.order_id is None
+        assert d.detail != ""
+
+    def test_three_charges_same_id_still_yields_one_discrepancy(self) -> None:
+        charges = [_charge("ch_dup"), _charge("ch_dup"), _charge("ch_dup")]
+        result = detect_duplicates(charges)
+        assert len(result) == 1
+        assert result[0].kind == DiscrepancyKind.DUPLICATE_CHARGE_ID
+
+    def test_two_separate_duplicate_groups_yield_two_discrepancies(self) -> None:
+        charges = [
+            _charge("ch_a"),
+            _charge("ch_a"),
+            _charge("ch_b"),
+            _charge("ch_b"),
+        ]
+        result = detect_duplicates(charges)
+        assert len(result) == 2
+        ids = {d.charge_id for d in result}
+        assert ids == {"ch_a", "ch_b"}
+        assert all(d.kind == DiscrepancyKind.DUPLICATE_CHARGE_ID for d in result)
+
+    def test_empty_input_returns_empty(self) -> None:
+        assert detect_duplicates([]) == []
+
+    def test_accepts_generator_input(self) -> None:
+        """detect_duplicates must not re-iterate — it may be a one-shot generator."""
+
+        def gen() -> Generator[StripeCharge, None, None]:
+            yield _charge("ch_dup")
+            yield _charge("ch_dup")
+
+        result = detect_duplicates(gen())
+        assert len(result) == 1
+        assert result[0].kind == DiscrepancyKind.DUPLICATE_CHARGE_ID
+
+
+class TestReconcileDuplicates:
+    def test_duplicate_charges_emits_duplicate_discrepancy(
+        self, store: OrdersStore
+    ) -> None:
+        charges = [_charge("ch_dup", 500), _charge("ch_dup", 500)]
+        result = reconcile(charges, store)
+        kinds = [d.kind for d in result]
+        assert DiscrepancyKind.DUPLICATE_CHARGE_ID in kinds
+
+    def test_duplicate_with_no_matching_order_emits_both_kinds(
+        self, store: OrdersStore
+    ) -> None:
+        # ch_dup appears twice and has no matching order in the empty store
+        charges = [_charge("ch_dup", 200), _charge("ch_dup", 200)]
+        result = reconcile(charges, store)
+        kinds = {d.kind for d in result}
+        assert DiscrepancyKind.DUPLICATE_CHARGE_ID in kinds
+        assert DiscrepancyKind.CHARGE_NOT_IN_ORDERS in kinds
+
+    def test_all_discrepancies_have_non_empty_detail(
+        self, store: OrdersStore, tmp_path: Path
+    ) -> None:
+        _seed_store(
+            store,
+            tmp_path,
+            [
+                ("ord_ghost", 999, "ch_ghost"),
+                ("ord_mismatch", 500, "ch_mismatch"),
+            ],
+        )
+        charges = [
+            _charge("ch_mismatch", 600),
+            _charge("ch_orphan", 800),
+            _charge("ch_dup", 100),
+            _charge("ch_dup", 100),
+        ]
+        result = reconcile(charges, store)
+        assert result, "expected at least one discrepancy in this scenario"
+        assert all(
+            d.detail for d in result
+        ), "every discrepancy must have a non-empty detail string"
