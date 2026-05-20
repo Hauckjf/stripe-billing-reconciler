@@ -1,3 +1,5 @@
 """Stripe API fetchers: cursor-paginated clients for charges and subscription invoices."""
 
-__all__: list[str] = []
+from stripe_reconciler.fetchers.charges import fetch_all_charges
+
+__all__: list[str] = ["fetch_all_charges"]
