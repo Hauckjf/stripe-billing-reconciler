@@ -1,0 +1,28 @@
+{
+  "object": "list",
+  "url": "/v1/charges",
+  "has_more": false,
+  "data": [
+    {"id": "ch_demo_021", "object": "charge", "amount": 1500,  "currency": "usd", "created": 1711013400, "status": "succeeded"},
+    {"id": "ch_demo_020", "object": "charge", "amount": 2500,  "currency": "usd", "created": 1710943200, "status": "succeeded"},
+    {"id": "ch_demo_019", "object": "charge", "amount": 13000, "currency": "usd", "created": 1710846000, "status": "succeeded"},
+    {"id": "ch_demo_018", "object": "charge", "amount": 5000,  "currency": "usd", "created": 1710756000, "status": "succeeded"},
+    {"id": "ch_demo_017", "object": "charge", "amount": 750,   "currency": "usd", "created": 1710662400, "status": "succeeded"},
+    {"id": "ch_demo_016", "object": "charge", "amount": 19900, "currency": "usd", "created": 1710601200, "status": "succeeded"},
+    {"id": "ch_demo_015", "object": "charge", "amount": 3000,  "currency": "usd", "created": 1710505800, "status": "succeeded"},
+    {"id": "ch_demo_014", "object": "charge", "amount": 11000, "currency": "usd", "created": 1710406800, "status": "succeeded"},
+    {"id": "ch_demo_013", "object": "charge", "amount": 5000,  "currency": "usd", "created": 1710326700, "status": "succeeded"},
+    {"id": "ch_demo_012", "object": "charge", "amount": 2000,  "currency": "usd", "created": 1710252000, "status": "succeeded"},
+    {"id": "ch_demo_011", "object": "charge", "amount": 8000,  "currency": "usd", "created": 1710156600, "status": "succeeded"},
+    {"id": "ch_demo_010", "object": "charge", "amount": 6000,  "currency": "usd", "created": 1710061200, "status": "succeeded"},
+    {"id": "ch_demo_009", "object": "charge", "amount": 12500, "currency": "usd", "created": 1709990100, "status": "succeeded"},
+    {"id": "ch_demo_008", "object": "charge", "amount": 500,   "currency": "usd", "created": 1709892000, "status": "succeeded"},
+    {"id": "ch_demo_007", "object": "charge", "amount": 7500,  "currency": "usd", "created": 1709828400, "status": "succeeded"},
+    {"id": "ch_demo_006", "object": "charge", "amount": 3500,  "currency": "usd", "created": 1709714700, "status": "succeeded"},
+    {"id": "ch_demo_005", "object": "charge", "amount": 14999, "currency": "usd", "created": 1709647200, "status": "succeeded"},
+    {"id": "ch_demo_004", "object": "charge", "amount": 9900,  "currency": "usd", "created": 1709544600, "status": "succeeded"},
+    {"id": "ch_demo_003", "object": "charge", "amount": 4999,  "currency": "usd", "created": 1709467200, "status": "succeeded"},
+    {"id": "ch_demo_002", "object": "charge", "amount": 2500,  "currency": "usd", "created": 1709377200, "status": "succeeded"},
+    {"id": "ch_demo_001", "object": "charge", "amount": 1000,  "currency": "usd", "created": 1709287200, "status": "succeeded"}
+  ]
+}
