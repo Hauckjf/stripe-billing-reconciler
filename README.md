@@ -43,7 +43,83 @@ cd stripe-billing-reconciler
 
 ## Usage
 
-_Examples coming with the first feature release._
+Set your Stripe API key before running:
+
+```bash
+export STRIPE_API_KEY=sk_test_...
+```
+
+Any [Stripe test-mode key](https://dashboard.stripe.com/test/apikeys) works; no live charges are made.
+
+### Example 1: reconcile a date window
+
+```bash
+stripe-reconcile reconcile \
+  --from-date 2024-01-01 \
+  --to-date   2024-01-31 \
+  --csv       examples/orders.csv \
+  --format    json
+```
+
+Expected output (truncated to 2 discrepancy objects; exit code `1` because discrepancies were found):
+
+```json
+[
+  {
+    "kind": "AMOUNT_MISMATCH",
+    "charge_id": "ch_1A2b3C4d5E6f",
+    "order_id": "ord_1001",
+    "stripe_amount_cents": 5000,
+    "order_amount_cents": 4999,
+    "detail": "order ord_1001 expects 4999 cents, Stripe reports 5000 cents (delta: +1)"
+  },
+  {
+    "kind": "CHARGE_NOT_IN_ORDERS",
+    "charge_id": "ch_9Z8y7X6w5V4u",
+    "order_id": null,
+    "stripe_amount_cents": 2500,
+    "order_amount_cents": null,
+    "detail": "Stripe charge 'ch_9Z8y7X6w5V4u' has no matching local order"
+  }
+]
+```
+
+Exit code is `0` when no discrepancies are found; `1` when at least one is detected.
+
+### Example 2: pipe into jq for summary
+
+```bash
+stripe-reconcile reconcile \
+  --csv    examples/orders.csv \
+  --format json \
+| jq '[.[] | .kind] | group_by(.) | map({kind: .[0], count: length})'
+```
+
+Expected output:
+
+```json
+[
+  {
+    "kind": "AMOUNT_MISMATCH",
+    "count": 1
+  },
+  {
+    "kind": "CHARGE_NOT_IN_ORDERS",
+    "count": 3
+  }
+]
+```
+
+### All options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--from-date DATE` | — | Start of the reconciliation window, inclusive (ISO 8601, e.g. `2024-01-01`). Omit to include all charges from the beginning of your Stripe history. |
+| `--to-date DATE` | — | End of the reconciliation window, inclusive (ISO 8601, e.g. `2024-01-31`). Omit to include charges up to the current timestamp. |
+| `--csv PATH` | — | Load orders from a CSV file (columns: `order_id`, `amount_cents`, `stripe_charge_id`, `created_at`) into a fresh SQLite database before reconciling. |
+| `--db PATH` | `./orders.db` | Path to an existing SQLite database containing the `orders` table. Ignored when `--csv` is provided. |
+| `--format FORMAT` | `json` | Output format: `json` (pretty-printed array), `csv` (header + one row per discrepancy), or `table` (rich ASCII table). |
+| `--output PATH` | stdout | Write the report to a file instead of stdout. |
 
 ## Architecture
 
