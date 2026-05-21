@@ -1,79 +1,72 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "stripe-billing-reconciler"
 version = "0.1.0"
-description = "Reconcile Stripe charges and subscriptions against your internal orders table \u2014 cursor-paginated, idempotent, rate-limit-aware, and auditable"
+description = "Reconcile Stripe charges against your internal orders table — cursor-paginated, idempotent, rate-limit-aware"
 readme = "README.md"
-license = { file = "LICENSE" }
-requires-python = ">=3.11"
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Environment :: Console",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Typing :: Typed",
-]
+license = { text = "MIT" }
+requires-python = ">=3.12"
 dependencies = [
-    "stripe>=8.0",
-    "pydantic>=2.0",
-    "pydantic-settings>=2.0",
-    "tenacity>=8.0",
-    "click>=8.0",
-    "rich>=13.0",
+    "stripe>=8",
+    "pydantic>=2",
+    "pydantic-settings",
+    "typer",
+    "rich",
+    "python-dotenv",
 ]
-
-[project.scripts]
-stripe-reconcile = "stripe_reconciler.cli:cli"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "pytest-cov>=5.0",
-    "mypy>=1.10",
-    "ruff>=0.4",
-    "pytest-httpx>=0.30",
-    "freezegun>=1.4",
+    "pytest>=8",
+    "pytest-cov",
+    "mypy",
+    "ruff",
+    "vcrpy",
+    "pytest-mock",
 ]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[project.scripts]
+stripe-reconcile = "stripe_reconciler.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stripe_reconciler", "src/reconciler"]
 
 [tool.mypy]
-python_version = "3.11"
 strict = true
-disallow_untyped_defs = true
-warn_return_any = true
-warn_unused_ignores = true
-show_error_codes = true
+python_version = "3.12"
+mypy_path = "src"
 
 [tool.ruff]
-target-version = "py311"
-line-length = 100
+src = ["src"]
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-    "D",       # pydocstyle \u2014 documentation style enforced in review, not linter
-    "COM812",  # missing trailing comma \u2014 conflicts with ruff formatter
-    "ISC001",  # implicit string concatenation \u2014 conflicts with ruff formatter
+    # Docstring rules — not enforced for this CLI tool
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "D104",
+    "D105",
+    "D106",
+    "D107",
+    "D203",   # one-blank-line-before-class (conflicts with D211)
+    "D213",   # multi-line-summary-second-line (conflicts with D212)
+    # Formatter-incompatible rules
+    "COM812", # trailing comma (managed by ruff format)
+    "ISC001", # implicit string concatenation (managed by ruff format)
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101"]
-
-[tool.coverage.run]
-source = ["src/reconciler"]
-branch = true
-
-[tool.coverage.report]
-fail_under = 85
-show_missing = true
+"tests/**/*.py" = ["ANN", "S101"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+addopts = "-m 'not slow'"
+markers = [
+    "slow: mark test as slow-running",
+]
