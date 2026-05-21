@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "stripe-billing-reconciler"
 version = "0.1.0"
-description = "Reconcile Stripe charges and subscriptions against your internal orders table — cursor-paginated, idempotent, rate-limit-aware, and auditable"
+description = "Reconcile Stripe charges and subscriptions against your internal orders table \u2014 cursor-paginated, idempotent, rate-limit-aware, and auditable"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
@@ -27,6 +27,9 @@ dependencies = [
     "click>=8.0",
     "rich>=13.0",
 ]
+
+[project.scripts]
+stripe-reconcile = "stripe_reconciler.cli:cli"
 
 [project.optional-dependencies]
 dev = [
@@ -56,9 +59,9 @@ line-length = 100
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-    "D",       # pydocstyle — documentation style enforced in review, not linter
-    "COM812",  # missing trailing comma — conflicts with ruff formatter
-    "ISC001",  # implicit string concatenation — conflicts with ruff formatter
+    "D",       # pydocstyle \u2014 documentation style enforced in review, not linter
+    "COM812",  # missing trailing comma \u2014 conflicts with ruff formatter
+    "ISC001",  # implicit string concatenation \u2014 conflicts with ruff formatter
 ]
 
 [tool.ruff.lint.per-file-ignores]
