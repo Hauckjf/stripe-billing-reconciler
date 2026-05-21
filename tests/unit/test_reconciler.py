@@ -72,6 +72,25 @@ class TestCleanRun:
         charges = [_charge("ch_001", 1000), _charge("ch_002", 2000)]
         assert reconcile(charges, store) == []
 
+    def test_three_charges_three_orders_all_matched_returns_empty(
+        self, store: OrdersStore, tmp_path: Path
+    ) -> None:
+        _seed_store(
+            store,
+            tmp_path,
+            [
+                ("ord_001", 1000, "ch_001"),
+                ("ord_002", 2500, "ch_002"),
+                ("ord_003", 750, "ch_003"),
+            ],
+        )
+        charges = [
+            _charge("ch_001", 1000),
+            _charge("ch_002", 2500),
+            _charge("ch_003", 750),
+        ]
+        assert reconcile(charges, store) == []
+
     def test_returns_list_not_generator(self, store: OrdersStore) -> None:
         result = reconcile(iter([_charge("ch_x")]), store)
         assert isinstance(result, list)
@@ -250,6 +269,41 @@ class TestCombinedScenario:
         assert d.charge_id == "ch_xyz"
         assert d.order_id == "ord_abc"
 
+    def test_all_four_discrepancy_kinds_exactly_four_total(
+        self, store: OrdersStore, tmp_path: Path
+    ) -> None:
+        # ch_dup appears twice              → DUPLICATE_CHARGE_ID  (1 discrepancy)
+        # ch_dup has matching order (same amount) → no extra discrepancy
+        # ch_mismatch (600) vs ord (500)   → AMOUNT_MISMATCH      (1 discrepancy)
+        # ch_orphan has no local order     → CHARGE_NOT_IN_ORDERS (1 discrepancy)
+        # ch_ghost order, no Stripe charge → ORDER_NOT_IN_STRIPE   (1 discrepancy)
+        _seed_store(
+            store,
+            tmp_path,
+            [
+                ("ord_dup", 1000, "ch_dup"),
+                ("ord_mismatch", 500, "ch_mismatch"),
+                ("ord_ghost", 999, "ch_ghost"),
+            ],
+        )
+        charges = [
+            _charge("ch_dup", 1000),
+            _charge("ch_dup", 1000),
+            _charge("ch_mismatch", 600),
+            _charge("ch_orphan", 800),
+        ]
+
+        result = reconcile(charges, store)
+
+        assert len(result) == 4
+        kinds = {d.kind for d in result}
+        assert kinds == {
+            DiscrepancyKind.DUPLICATE_CHARGE_ID,
+            DiscrepancyKind.AMOUNT_MISMATCH,
+            DiscrepancyKind.CHARGE_NOT_IN_ORDERS,
+            DiscrepancyKind.ORDER_NOT_IN_STRIPE,
+        }
+
 
 class TestBuildDetail:
     def test_amount_mismatch_contains_order_id_and_both_amounts(self) -> None:
@@ -264,14 +318,12 @@ class TestBuildDetail:
         charge = _charge("ch_001", 1450)
         order = _order("ORD-123", 1500, "ch_001")
         detail = build_detail(DiscrepancyKind.AMOUNT_MISMATCH, charge, order)
-        # delta = 1450 - 1500 = -50
         assert "-50" in detail
 
     def test_amount_mismatch_positive_delta_shown_with_sign(self) -> None:
         charge = _charge("ch_001", 2000)
         order = _order("ORD-456", 1500, "ch_001")
         detail = build_detail(DiscrepancyKind.AMOUNT_MISMATCH, charge, order)
-        # delta = 2000 - 1500 = +500
         assert "+500" in detail
 
     def test_charge_not_in_orders_contains_charge_id(self) -> None:
@@ -364,7 +416,6 @@ class TestReconcileDuplicates:
     def test_duplicate_with_no_matching_order_emits_both_kinds(
         self, store: OrdersStore
     ) -> None:
-        # ch_dup appears twice and has no matching order in the empty store
         charges = [_charge("ch_dup", 200), _charge("ch_dup", 200)]
         result = reconcile(charges, store)
         kinds = {d.kind for d in result}
