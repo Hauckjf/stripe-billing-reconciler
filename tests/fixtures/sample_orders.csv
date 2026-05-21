@@ -1,0 +1,4 @@
+order_id,amount_cents,stripe_charge_id,created_at
+ord_001,9900,ch_test_abc123,2024-01-15T10:30:00+00:00
+ord_002,4900,ch_test_def456,2024-01-16T08:00:00+00:00
+ord_003,14900,ch_test_ghi789,2024-01-17T14:45:00+00:00
