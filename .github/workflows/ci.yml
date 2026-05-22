@@ -21,4 +21,11 @@ jobs:
       - run: pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt 2>/dev/null || pip install -e .
       - run: ruff check . || true
       - run: mypy . || true
-      - run: pytest -q || true
+      - run: pytest -q --cov=stripe_billing_reconciler --cov-report=xml || true
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        continue-on-error: true
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          fail_ci_if_error: false

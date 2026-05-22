@@ -1,6 +1,6 @@
 # Stripe Billing Reconciler
 
-![CI](https://github.com/Hauckjf/stripe-billing-reconciler/actions/workflows/ci.yml/badge.svg) ![License](https://img.shields.io/github/license/Hauckjf/stripe-billing-reconciler?color=blue) ![Last commit](https://img.shields.io/github/last-commit/Hauckjf/stripe-billing-reconciler)
+[![CI](https://img.shields.io/github/actions/workflow/status/Hauckjf/stripe-billing-reconciler/ci.yml?branch=main&style=flat&label=CI)](https://github.com/Hauckjf/stripe-billing-reconciler/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat)](LICENSE) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?style=flat)](https://www.python.org/downloads/) [![Coverage](https://img.shields.io/codecov/c/github/Hauckjf/stripe-billing-reconciler?style=flat)](https://codecov.io/gh/Hauckjf/stripe-billing-reconciler)
 
 > Reconcile Stripe charges and subscriptions against your internal orders table — cursor-paginated, idempotent, rate-limit-aware, and auditable.
 
