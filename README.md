@@ -13,6 +13,7 @@ CLI tool written in Python — chosen for scripting ergonomics and Stripe SDK ma
 - [Installation](#installation)
 - [Usage](#usage)
 - [Architecture](#architecture)
+- [Performance](#performance)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -185,6 +186,18 @@ stripe-billing-reconciler/
 - [ADR-0001](docs/adr/0001-sqlite-for-local-orders-store.md) — SQLite for local orders store
 - [ADR-0002](docs/adr/0002-cursor-based-pagination.md) — cursor-based pagination
 - [ADR-0003](docs/adr/0003-cli-and-data-model-choices.md) — CLI and data model choices
+
+## Performance
+
+End-to-end wall-time benchmarks measured with `timeit` (5 iterations, median
+reported). All HTTP calls are intercepted by the `responses` library — no live
+Stripe API key needed.
+
+```bash
+python bench/benchmark_pagination.py
+```
+
+Full results with machine spec: [bench/results.md](bench/results.md).
 
 ## Contributing
 
