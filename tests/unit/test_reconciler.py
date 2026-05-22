@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from stripe_reconciler.models import DiscrepancyKind, LocalOrder, StripeCharge
+from stripe_reconciler.models import (
+    DiscrepancyKind,
+    LocalOrder,
+    StripeCharge,
+    StripeSubscription,
+)
 from stripe_reconciler.reconciler import build_detail, detect_duplicates, reconcile
 from stripe_reconciler.store import OrdersStore
 
@@ -23,6 +28,21 @@ def _charge(charge_id: str, amount: int = 1000) -> StripeCharge:
         created=_NOW,
         status="succeeded",
     )
+
+
+def _charge_with_sub(charge_id: str, sub_id: str, amount: int = 1000) -> StripeCharge:
+    return StripeCharge(
+        id=charge_id,
+        amount=amount,
+        currency="usd",
+        created=_NOW,
+        status="succeeded",
+        metadata={"subscription_id": sub_id},
+    )
+
+
+def _sub(sub_id: str, status: str = "active") -> StripeSubscription:
+    return StripeSubscription(id=sub_id, status=status)
 
 
 def _order(order_id: str, amount_cents: int, stripe_charge_id: str) -> LocalOrder:
@@ -206,9 +226,6 @@ class TestCombinedScenario:
     def test_one_mismatch_one_orphan_charge_returns_exactly_two_discrepancies(
         self, store: OrdersStore, tmp_path: Path
     ) -> None:
-        # ch_clean  : Stripe 1000 == order 1000  → no discrepancy
-        # ch_mismatch: Stripe 2000 != order 1500 → AMOUNT_MISMATCH
-        # ch_orphan : Stripe charge, no order    → CHARGE_NOT_IN_ORDERS
         _seed_store(
             store,
             tmp_path,
@@ -235,9 +252,6 @@ class TestCombinedScenario:
     def test_all_three_discrepancy_kinds_in_single_run(
         self, store: OrdersStore, tmp_path: Path
     ) -> None:
-        # ord_ghost  → ch_ghost (not in charges)         → ORDER_NOT_IN_STRIPE
-        # ch_mismatch ↔ ord_mismatch (amounts differ)    → AMOUNT_MISMATCH
-        # ch_orphan has no order                         → CHARGE_NOT_IN_ORDERS
         _seed_store(
             store,
             tmp_path,
@@ -272,11 +286,6 @@ class TestCombinedScenario:
     def test_all_four_discrepancy_kinds_exactly_four_total(
         self, store: OrdersStore, tmp_path: Path
     ) -> None:
-        # ch_dup appears twice              → DUPLICATE_CHARGE_ID  (1 discrepancy)
-        # ch_dup has matching order (same amount) → no extra discrepancy
-        # ch_mismatch (600) vs ord (500)   → AMOUNT_MISMATCH      (1 discrepancy)
-        # ch_orphan has no local order     → CHARGE_NOT_IN_ORDERS (1 discrepancy)
-        # ch_ghost order, no Stripe charge → ORDER_NOT_IN_STRIPE   (1 discrepancy)
         _seed_store(
             store,
             tmp_path,
@@ -444,3 +453,138 @@ class TestReconcileDuplicates:
         assert all(
             d.detail for d in result
         ), "every discrepancy must have a non-empty detail string"
+
+
+class TestSubscriptionEnrichment:
+    def test_subscriptions_none_produces_identical_output(
+        self, store: OrdersStore, tmp_path: Path
+    ) -> None:
+        """reconcile with subscriptions=None must be identical to the baseline (no-kwarg) call."""
+        _seed_store(store, tmp_path, [("ord_001", 900, "ch_001")])
+        charges = [_charge("ch_001", 1000)]
+        baseline = reconcile(charges, store)
+        result = reconcile(charges, store, subscriptions=None)
+        assert result == baseline
+
+    def test_amount_mismatch_with_matching_sub_enriches_detail(
+        self, store: OrdersStore, tmp_path: Path
+    ) -> None:
+        """AMOUNT_MISMATCH detail gains '; subscription: <id> (<status>)' suffix."""
+        _seed_store(store, tmp_path, [("ord_001", 900, "ch_sub_1")])
+        charges = [_charge_with_sub("ch_sub_1", "sub_abc123", amount=1000)]
+        subs = [_sub("sub_abc123", "active")]
+
+        result = reconcile(charges, store, subscriptions=subs)
+
+        assert len(result) == 1
+        d = result[0]
+        assert d.kind == DiscrepancyKind.AMOUNT_MISMATCH
+        assert "; subscription: sub_abc123 (active)" in d.detail
+
+    def test_charge_not_in_orders_with_matching_sub_enriches_detail(
+        self, store: OrdersStore
+    ) -> None:
+        """CHARGE_NOT_IN_ORDERS detail gains subscription context when charge has sub metadata."""
+        charges = [_charge_with_sub("ch_orphan", "sub_xyz", amount=5000)]
+        subs = [_sub("sub_xyz", "past_due")]
+
+        result = reconcile(charges, store, subscriptions=subs)
+
+        assert len(result) == 1
+        d = result[0]
+        assert d.kind == DiscrepancyKind.CHARGE_NOT_IN_ORDERS
+        assert "; subscription: sub_xyz (past_due)" in d.detail
+
+    def test_order_not_in_stripe_never_enriched(
+        self, store: OrdersStore, tmp_path: Path
+    ) -> None:
+        """ORDER_NOT_IN_STRIPE discrepancies are never modified, even when subs are provided."""
+        _seed_store(store, tmp_path, [("ord_ghost", 999, "ch_ghost")])
+        subs = [_sub("sub_unrelated", "active")]
+
+        result = reconcile([], store, subscriptions=subs)
+
+        assert len(result) == 1
+        assert result[0].kind == DiscrepancyKind.ORDER_NOT_IN_STRIPE
+        assert "; subscription:" not in result[0].detail
+
+    def test_duplicate_charge_id_never_enriched(
+        self, store: OrdersStore
+    ) -> None:
+        """DUPLICATE_CHARGE_ID discrepancies are never enriched regardless of sub metadata."""
+        charges = [
+            _charge_with_sub("ch_dup", "sub_123"),
+            _charge_with_sub("ch_dup", "sub_123"),
+        ]
+        subs = [_sub("sub_123", "active")]
+
+        result = reconcile(charges, store, subscriptions=subs)
+        dup_discrepancies = [d for d in result if d.kind == DiscrepancyKind.DUPLICATE_CHARGE_ID]
+
+        assert dup_discrepancies, "expected at least one DUPLICATE_CHARGE_ID discrepancy"
+        for d in dup_discrepancies:
+            assert "; subscription:" not in d.detail
+
+    def test_charge_without_subscription_id_not_enriched(
+        self, store: OrdersStore, tmp_path: Path
+    ) -> None:
+        """AMOUNT_MISMATCH with no subscription_id in metadata is left untouched."""
+        _seed_store(store, tmp_path, [("ord_001", 900, "ch_plain")])
+        charges = [_charge("ch_plain", 1000)]
+        subs = [_sub("sub_irrelevant", "active")]
+
+        result = reconcile(charges, store, subscriptions=subs)
+
+        assert len(result) == 1
+        assert "; subscription:" not in result[0].detail
+
+    def test_charge_with_unknown_sub_id_not_enriched(
+        self, store: OrdersStore, tmp_path: Path
+    ) -> None:
+        """subscription_id in metadata but not in subs list → detail unchanged."""
+        _seed_store(store, tmp_path, [("ord_001", 900, "ch_sub_unknown")])
+        charges = [_charge_with_sub("ch_sub_unknown", "sub_missing", amount=1000)]
+        subs = [_sub("sub_other", "active")]
+
+        result = reconcile(charges, store, subscriptions=subs)
+
+        assert len(result) == 1
+        assert "; subscription:" not in result[0].detail
+
+    def test_empty_subscriptions_list_produces_no_enrichment(
+        self, store: OrdersStore, tmp_path: Path
+    ) -> None:
+        """Empty subscriptions list (not None) → enrichment runs but finds nothing."""
+        _seed_store(store, tmp_path, [("ord_001", 900, "ch_sub_1")])
+        charges = [_charge_with_sub("ch_sub_1", "sub_abc", amount=1000)]
+
+        result = reconcile(charges, store, subscriptions=[])
+
+        assert len(result) == 1
+        assert "; subscription:" not in result[0].detail
+
+    def test_detail_contains_sub_id_and_status_verbatim(
+        self, store: OrdersStore, tmp_path: Path
+    ) -> None:
+        """Enriched suffix format is exactly '; subscription: <id> (<status>)'."""
+        _seed_store(store, tmp_path, [("ord_001", 900, "ch_001")])
+        charges = [_charge_with_sub("ch_001", "sub_aBcDeF", amount=1000)]
+        subs = [_sub("sub_aBcDeF", "canceled")]
+
+        result = reconcile(charges, store, subscriptions=subs)
+
+        assert "; subscription: sub_aBcDeF (canceled)" in result[0].detail
+
+    def test_subscriptions_generator_consumed_once(
+        self, store: OrdersStore
+    ) -> None:
+        """reconcile must not re-iterate subscriptions — supports one-shot iterators."""
+        charges = [_charge_with_sub("ch_orphan", "sub_gen", amount=3000)]
+
+        def one_shot_subs() -> Generator[StripeSubscription, None, None]:
+            yield _sub("sub_gen", "trialing")
+
+        result = reconcile(charges, store, subscriptions=one_shot_subs())
+
+        assert len(result) == 1
+        assert "; subscription: sub_gen (trialing)" in result[0].detail

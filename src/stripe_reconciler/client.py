@@ -123,3 +123,28 @@ class StripeClient:
             return stripe.Event.list(**params)
 
         return self._retry(_call)()  # type: ignore[no-any-return]
+
+    def list_subscriptions(
+        self,
+        starting_after: str | None = None,
+        limit: int = 100,
+    ) -> stripe.ListObject:  # type: ignore[type-arg]
+        """Return one cursor-paginated page of Stripe subscriptions.
+
+        Args:
+            starting_after: ID of the last object in the previous page (cursor).
+            limit: Maximum objects to return per page (1–100).
+
+        Returns:
+            A :class:`stripe.ListObject` whose ``.data`` contains
+            :class:`stripe.Subscription` objects and ``.has_more`` signals
+            whether another page is available.
+        """
+        params: dict[str, Any] = {"limit": limit}
+        if starting_after is not None:
+            params["starting_after"] = starting_after
+
+        def _call() -> Any:
+            return stripe.Subscription.list(**params)
+
+        return self._retry(_call)()  # type: ignore[no-any-return]

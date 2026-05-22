@@ -13,14 +13,15 @@ from stripe_reconciler.client import StripeClient
 from stripe_reconciler.config import Settings
 from stripe_reconciler.fetchers.charges import fetch_all_charges
 from stripe_reconciler.fetchers.events import fetch_subscription_events
+from stripe_reconciler.fetchers.subscriptions import fetch_subscriptions
 from stripe_reconciler.formatters import to_csv, to_json, to_table
-from stripe_reconciler.models import StripeCharge
+from stripe_reconciler.models import StripeCharge, StripeSubscription
 from stripe_reconciler.reconciler import reconcile as _run_reconcile
 from stripe_reconciler.store import OrdersStore
 
 
 class _IsoDate(click.ParamType):
-    """Click parameter type: YYYY-MM-DD string \u2192 UTC-aware datetime."""
+    """Click parameter type: YYYY-MM-DD string → UTC-aware datetime."""
 
     name = "DATE"
 
@@ -44,7 +45,7 @@ _ISO_DATE = _IsoDate()
 
 @click.group()
 def cli() -> None:
-    """Stripe Billing Reconciler \u2014 cross-reference Stripe charges against your orders table."""
+    """Stripe Billing Reconciler — cross-reference Stripe charges against your orders table."""
 
 
 @cli.command()
@@ -97,6 +98,17 @@ def cli() -> None:
     type=click.Path(dir_okay=False, path_type=Path),
     help="Write the report to this file. Defaults to stdout.",
 )
+@click.option(
+    "--enrich-subscriptions",
+    "enrich_subscriptions",
+    is_flag=True,
+    default=False,
+    help=(
+        "Fetch all Stripe subscriptions and append subscription context "
+        "(ID and status) to AMOUNT_MISMATCH and CHARGE_NOT_IN_ORDERS "
+        "discrepancies whose charge carries a subscription_id in its metadata."
+    ),
+)
 def reconcile(
     from_date: datetime | None,
     to_date: datetime | None,
@@ -104,11 +116,12 @@ def reconcile(
     csv_path: Path | None,
     output_format: str,
     output_path: Path | None,
+    enrich_subscriptions: bool,
 ) -> None:
     """Fetch Stripe charges and events, cross-reference against local orders, report discrepancies.
 
-    Exit code 0 \u2014 clean run, no discrepancies found.
-    Exit code 1 \u2014 at least one discrepancy was detected.
+    Exit code 0 — clean run, no discrepancies found.
+    Exit code 1 — at least one discrepancy was detected.
     """
     try:
         settings = Settings(db_path=db_path)
@@ -154,7 +167,17 @@ def reconcile(
         store.close()
         raise click.ClickException(f"Stripe API error: {exc}") from exc
 
-    discrepancies = _run_reconcile(charges, store)
+    subscriptions: list[StripeSubscription] | None = None
+    if enrich_subscriptions:
+        try:
+            subscriptions = list(fetch_subscriptions(client, settings.stripe_page_size))
+        except Exception as exc:
+            store.close()
+            raise click.ClickException(
+                f"Stripe API error fetching subscriptions: {exc}"
+            ) from exc
+
+    discrepancies = _run_reconcile(charges, store, subscriptions=subscriptions)
     store.close()
 
     formatters = {"json": to_json, "csv": to_csv, "table": to_table}
