@@ -87,7 +87,7 @@ Set your Stripe API key before running:
 export STRIPE_API_KEY=sk_test_...
 ```
 
-Any [Stripe test-mode key](https://dashboard.stripe.com/test/apikeys) works; no live charges are made.
+Any [Stripe test-mode key](https://dashboard.stripe.com/test/apikeys) works; no live charges are made. The reconciler matches each Stripe charge against your local orders CSV by `stripe_charge_id`, classifies every delta (amount mismatch, charge not in orders, order not in Stripe), and writes a structured report to stdout. Runs are fully idempotent — use `--resume` to continue an interrupted run from its last saved cursor without re-fetching already-processed pages.
 
 ### Example 1: reconcile a date window
 
