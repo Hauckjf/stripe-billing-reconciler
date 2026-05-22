@@ -4,7 +4,7 @@
 
 > Reconcile Stripe charges and subscriptions against your internal orders table — cursor-paginated, idempotent, rate-limit-aware, and auditable.
 
-CLI tool written in Python — chosen for scripting ergonomics and Stripe SDK maturity — that fetches Stripe charge and subscription events via cursor-based pagination, cross-references them against a local orders table (columns: order_id TEXT, amount_cents INTEGER, stripe_charge_id TEXT, created_at TIMESTAMP), and outputs a structured discrepancy re
+CLI tool written in Python — chosen for scripting ergonomics and Stripe SDK maturity — that fetches Stripe charge and subscription events via cursor-based pagination, cross-references them against a local orders table (columns: order_id TEXT, amount_cents INTEGER, stripe_charge_id TEXT, created_at TIMESTAMP), and outputs a structured discrepancy report.
 
 ## Table of contents
 
@@ -18,7 +18,7 @@ CLI tool written in Python — chosen for scripting ergonomics and Stripe SDK ma
 
 ## About
 
-CLI tool written in Python — chosen for scripting ergonomics and Stripe SDK maturity — that fetches Stripe charge and subscription events via cursor-based pagination, cross-references them against a local orders table (columns: order_id TEXT, amount_cents INTEGER, stripe_charge_id TEXT, created_at TIMESTAMP), and outputs a structured discrepancy re
+CLI tool written in Python — chosen for scripting ergonomics and Stripe SDK maturity — that fetches Stripe charge and subscription events via cursor-based pagination, cross-references them against a local orders table (columns: order_id TEXT, amount_cents INTEGER, stripe_charge_id TEXT, created_at TIMESTAMP), and outputs a structured discrepancy report.
 
 **What this demonstrates**
 
@@ -35,11 +35,48 @@ Python · Stripe SDK · SQLite · Click · pytest · mypy · ruff · GitHub Acti
 
 ## Installation
 
+### Prerequisites
+
+- **Python ≥ 3.11** — check with `python --version`
+- **A Stripe restricted API key** with **read** access on **Charges** and **Subscriptions** — create one at [dashboard.stripe.com/apikeys](https://dashboard.stripe.com/test/apikeys) (test-mode keys work; no live charges are made)
+
+### Via pipx (recommended for end-users)
+
+[pipx](https://pipx.pypa.io) installs the CLI in an isolated environment and puts `stripe-reconcile` on your `PATH` without polluting your global Python:
+
+```bash
+pipx install stripe-billing-reconciler
+```
+
+Verify the installation:
+
+```bash
+stripe-reconcile --version
+```
+
+### Via pip
+
+```bash
+pip install stripe-billing-reconciler
+```
+
+### Dev setup
+
 ```bash
 git clone https://github.com/Hauckjf/stripe-billing-reconciler.git
 cd stripe-billing-reconciler
-# install dependencies
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -e '.[dev]'
 ```
+
+Confirm everything is wired up:
+
+```bash
+pytest
+```
+
+All tests should pass. The suite runs against fixture data — no Stripe API key required.
 
 ## Usage
 
@@ -114,54 +151,45 @@ Expected output:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--from-date DATE` | — | Start of the reconciliation window, inclusive (ISO 8601, e.g. `2024-01-01`). Omit to include all charges from the beginning of your Stripe history. |
-| `--to-date DATE` | — | End of the reconciliation window, inclusive (ISO 8601, e.g. `2024-01-31`). Omit to include charges up to the current timestamp. |
-| `--csv PATH` | — | Load orders from a CSV file (columns: `order_id`, `amount_cents`, `stripe_charge_id`, `created_at`) into a fresh SQLite database before reconciling. |
-| `--db PATH` | `./orders.db` | Path to an existing SQLite database containing the `orders` table. Ignored when `--csv` is provided. |
-| `--format FORMAT` | `json` | Output format: `json` (pretty-printed array), `csv` (header + one row per discrepancy), or `table` (rich ASCII table). |
-| `--output PATH` | stdout | Write the report to a file instead of stdout. |
+| `--from-date DATE` | — | Start of the reconciliation window, inclusive (ISO 8601, e.g. `2024-01-01`). Omit to include all charges from the beginning of your Stripe account. |
+| `--to-date DATE` | — | End of the reconciliation window, inclusive (ISO 8601). Omit to include all charges up to now. |
+| `--csv PATH` | — | Path to the local orders CSV file. Required columns: `order_id`, `amount_cents`, `stripe_charge_id`, `created_at`. |
+| `--format {json,table}` | `table` | Output format. `json` emits a JSON array to stdout suitable for piping; `table` renders a human-readable grid. |
+| `--tolerance-cents INT` | `0` | Ignore amount deltas within this many cents. Useful for rounding differences between systems. |
+| `--resume` | off | Resume from the last saved cursor checkpoint stored in `reconciler.db`. Use after an interrupted run to avoid re-fetching already-processed events. |
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    CLI --> ConfigLoader["Config loader"]
-    ConfigLoader --> StripeClient["StripeClient"]
-    StripeClient --> ChargesFetcher["ChargesFetcher"]
-    StripeClient --> EventsFetcher["EventsFetcher"]
-    ChargesFetcher --> Reconciler["Reconciler"]
-    SQLiteStore["SQLiteStore (orders)"] --> Reconciler
-    Reconciler --> DiscrepancyClassifier["DiscrepancyClassifier"]
-    DiscrepancyClassifier --> Formatter["Formatter"]
-    Formatter --> Output["stdout / file"]
+```
+stripe-billing-reconciler/
+├── src/stripe_reconciler/
+│   ├── cli.py               # Click entrypoint — parses flags, orchestrates the run
+│   ├── client.py            # Stripe SDK wrapper with token-bucket rate limiter
+│   ├── fetchers/
+│   │   ├── charges.py       # Cursor-paginated charge fetcher
+│   │   ├── events.py        # Event stream fetcher (subscription change events)
+│   │   └── subscriptions.py # Subscription fetcher
+│   ├── reconciler.py        # Core diff engine — joins orders against Stripe data
+│   ├── classifier.py        # Labels discrepancies: AMOUNT_MISMATCH, CHARGE_NOT_IN_ORDERS, ORDER_NOT_IN_STRIPE
+│   ├── store.py             # SQLite store — orders table + checkpoint table
+│   ├── models.py            # Typed models: Charge, Order, Discrepancy
+│   ├── formatters.py        # JSON and table output formatters
+│   └── config.py            # Config loading (env vars + CLI flags)
+└── tests/
+    ├── unit/                # Fast, isolated tests per module
+    └── integration/         # End-to-end reconcile flow against fixture data
 ```
 
-The CLI parses flags and loads configuration (API key, date range, tolerance), then initialises a shared `StripeClient` that enforces the token-bucket rate limiter on every outbound request. `ChargesFetcher` and `EventsFetcher` pull Stripe data in cursor-paginated batches, checkpointing each cursor to SQLite so an interrupted run resumes exactly where it left off; simultaneously, `SQLiteStore` surfaces the internal orders rows for cross-referencing. The `Reconciler` joins Stripe records against orders by `stripe_charge_id`, then `DiscrepancyClassifier` buckets each pair into `matched`, `amount_mismatched`, or `unmatched` before `Formatter` serialises the final report to stdout or a file path.
+**Key design decisions** are documented in `docs/adr/`:
 
-Architectural decision records live in [`docs/adr/`](docs/adr/).
-
-## Definition of done
-
-- Fetches all charges and subscription invoices for a configurable date range using cursor pagination; resumes an interrupted run from the last SQLite checkpoint without reprocessing already-seen events.
-- Respects Stripe rate limits via token-bucket throttler; no 429 responses observed when running against a Stripe test-mode account with default concurrency settings.
-- Orders table contract: tool expects columns order_id TEXT, amount_cents INTEGER, stripe_charge_id TEXT, created_at TIMESTAMP; accepts an alternate table name via --schema flag; a migrations script is included to create the table from scratch.
-- Outputs a JSON report with three top-level arrays — matched, unmatched, amount_mismatched — each entry including stripe_charge_id, order_id (if found), expected_amount_cents, actual_amount_cents, and delta_cents.
-- CLI accepts --from (ISO date), --to (ISO date), --output (file path, default stdout), --tolerance (int cents, default 0), --threshold (max unmatched count before non-zero exit, default 0), --mock (offline run against bundled fixtures), --schema (alternate orders table name); exits non-zero when unmatched count exceeds --threshold.
-- pytest suite achieves ≥85% line coverage enforced via pytest-cov --fail-under=85; suite covers cursor resume logic, each discrepancy classification rule, token-bucket refill timing, and all CLI flag combinations.
-- --mock flag loads bundled fixtures/stripe_events.json (50 charges, 10 subscription invoices) and fixtures/orders.csv and runs the full reconcile pipeline end-to-end without a live Stripe key; README Quick Start section uses this flag with truncated sample output.
-- mypy --strict passes with zero errors; ruff check passes with zero warnings; both run as required steps in the GitHub Actions CI workflow and block merge on failure.
-- README covers five sections: Installation (pip install -e . with Python ≥3.11 requirement), Quick Start (copy-paste --mock command with truncated JSON output), Configuration (STRIPE_API_KEY and DATABASE_URL env vars with SQLite default), Output schema (annotated JSON example with all three report arrays), and Limitations (no webhook ingestion, Stripe Connect accounts not tested, charge refunds counted as unmatched).
+- [ADR-0001](docs/adr/0001-sqlite-for-local-orders-store.md) — SQLite for local orders store
+- [ADR-0002](docs/adr/0002-cursor-based-pagination.md) — cursor-based pagination
+- [ADR-0003](docs/adr/0003-cli-and-data-model-choices.md) — CLI and data model choices
 
 ## Contributing
 
-See [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md).
+See [CONTRIBUTING.md](.github/CONTRIBUTING.md).
 
 ## License
 
 [MIT](LICENSE)
-
----
-
-<sub>Part of [@Hauckjf](https://github.com/Hauckjf)'s portfolio.</sub>
-
-<sub>Built with [Claude Code](https://claude.com/claude-code) — reviewed, tested, and maintained by [@Hauckjf](https://github.com/Hauckjf).</sub>
