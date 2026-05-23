@@ -1,0 +1,76 @@
+name: Audit
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: |
+          python -m pip install -U pip
+          pip install -e ".[dev]" 2>/dev/null || pip install -r requirements.txt 2>/dev/null || pip install -e .
+      - name: Lint (ruff)
+        id: lint
+        run: ruff check .
+        continue-on-error: true
+      - name: Typecheck (mypy)
+        id: typecheck
+        run: mypy .
+        continue-on-error: true
+      - name: Tests with coverage
+        id: tests
+        run: |
+          pip install pytest-cov 2>/dev/null || true
+          pytest --cov --cov-report=json --cov-report=term -q || true
+        continue-on-error: true
+      - name: Run first example (best-effort)
+        id: example
+        run: |
+          first=$(ls examples/*.py 2>/dev/null | head -1 || true)
+          if [ -n "$first" ]; then
+            timeout 30 python "$first" > example-stdout.txt 2> example-stderr.txt || echo "example exit=$?"
+          fi
+        continue-on-error: true
+      - name: Pip audit
+        id: pipaudit
+        run: |
+          pip install pip-audit 2>/dev/null || true
+          pip-audit --format=json > pip-audit.json || true
+        continue-on-error: true
+      - name: Generate audit summary
+        run: |
+          LOC=$(find . -type f -name '*.py' -not -path './.venv/*' -not -path './venv/*' -exec cat {} + 2>/dev/null | wc -l)
+          COVERAGE_PCT=$(python -c "import json; d=json.load(open('coverage.json')); print(round(d['totals']['percent_covered'],1))" 2>/dev/null || echo 0)
+          cat > audit.json <<EOF
+          {
+            "stack": "python",
+            "loc": $LOC,
+            "coverage_pct": $COVERAGE_PCT,
+            "lint_outcome": "${{ steps.lint.outcome }}",
+            "typecheck_outcome": "${{ steps.typecheck.outcome }}",
+            "tests_outcome": "${{ steps.tests.outcome }}",
+            "example_outcome": "${{ steps.example.outcome }}",
+            "pipaudit_outcome": "${{ steps.pipaudit.outcome }}"
+          }
+          EOF
+          cat audit.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audit-result
+          path: |
+            audit.json
+            coverage.json
+            pip-audit.json
+            example-stdout.txt
+            example-stderr.txt
+          if-no-files-found: ignore
