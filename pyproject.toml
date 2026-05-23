@@ -47,7 +47,7 @@ dev = [
 ]
 
 [project.scripts]
-stripe-reconciler = "stripe_billing_reconciler.cli:main"
+stripe-reconciler = "stripe_reconciler.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Hauckjf/stripe-billing-reconciler"
@@ -67,7 +67,7 @@ mypy_path = "src"
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["stripe_reconciler.*", "reconciler.*"]
+module = ["stripe_reconciler.*"]
 ignore_errors = true
 
 [tool.ruff]
@@ -78,11 +78,11 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-    "D203",   # one-blank-line-before-class — conflicts with D211
-    "D213",   # multi-line-docstring-summary-second-line — conflicts with D212
-    "ANN101", # missing-type-annotation-self
-    "COM812", # missing-trailing-comma — conflicts with ruff format
-    "ISC001", # single-line-implicit-string-concatenation — conflicts with ruff format
+    "D203",
+    "D213",
+    "ANN101",
+    "COM812",
+    "ISC001",
 ]
 
 [tool.ruff.lint.per-file-ignores]
