@@ -41,7 +41,7 @@ def _store_with_order(
 ) -> OrdersStore:
     """Return an in-memory OrdersStore pre-populated with a single order."""
     store = OrdersStore(":memory:")
-    store.conn.execute(
+    store._conn.execute(
         "INSERT INTO orders (order_id, amount_cents, stripe_charge_id, created_at)"
         " VALUES (?, ?, ?, ?)",
         (
@@ -51,7 +51,7 @@ def _store_with_order(
             datetime(2024, 3, 1, tzinfo=timezone.utc).isoformat(),
         ),
     )
-    store.conn.commit()
+    store._conn.commit()
     return store
 
 
