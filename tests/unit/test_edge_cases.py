@@ -8,11 +8,9 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock
 
-import pytest
-
 from stripe_reconciler.fetchers.charges import fetch_all_charges
 from stripe_reconciler.formatters import to_csv, to_json, to_table
-from stripe_reconciler.models import DiscrepancyKind, LocalOrder, StripeCharge
+from stripe_reconciler.models import DiscrepancyKind, StripeCharge
 from stripe_reconciler.reconciler import reconcile
 from stripe_reconciler.store import OrdersStore
 
@@ -210,10 +208,10 @@ class TestCrlfCsv:
     def test_crlf_csv_loads_all_rows(self, tmp_path: Path) -> None:
         """Windows CRLF line endings must not corrupt row count or field values."""
         csv_bytes = (
-            "order_id,amount_cents,stripe_charge_id,created_at\r\n"
-            "ord_w1,1000,ch_w1,2024-03-01T12:00:00+00:00\r\n"
-            "ord_w2,2500,ch_w2,2024-03-02T12:00:00+00:00\r\n"
-        ).encode("utf-8")
+            b"order_id,amount_cents,stripe_charge_id,created_at\r\n"
+            b"ord_w1,1000,ch_w1,2024-03-01T12:00:00+00:00\r\n"
+            b"ord_w2,2500,ch_w2,2024-03-02T12:00:00+00:00\r\n"
+        )
         csv_file = tmp_path / "crlf_orders.csv"
         csv_file.write_bytes(csv_bytes)
 
@@ -229,9 +227,9 @@ class TestCrlfCsv:
     def test_crlf_csv_preserves_amount_cents_exactly(self, tmp_path: Path) -> None:
         """CRLF stripping must not leave trailing whitespace that corrupts int parsing."""
         csv_bytes = (
-            "order_id,amount_cents,stripe_charge_id,created_at\r\n"
-            "ord_w3,9999,ch_w3,2024-03-03T12:00:00+00:00\r\n"
-        ).encode("utf-8")
+            b"order_id,amount_cents,stripe_charge_id,created_at\r\n"
+            b"ord_w3,9999,ch_w3,2024-03-03T12:00:00+00:00\r\n"
+        )
         csv_file = tmp_path / "crlf_single.csv"
         csv_file.write_bytes(csv_bytes)
 
