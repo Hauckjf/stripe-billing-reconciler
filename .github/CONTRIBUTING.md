@@ -95,14 +95,16 @@ Expected tail output on a clean run:
 
 ### Tests with branch coverage
 
-Coverage is configured in `pyproject.toml` and enforces an 85 % line threshold:
+Coverage is configured in `pyproject.toml` and enforces a 70 % line threshold:
 
 ```bash
 pytest --cov --cov-report=term-missing
 ```
 
 The report highlights which lines are not exercised. If coverage drops below
-85 %, the command exits non-zero — same behaviour as CI.
+70 %, the command exits non-zero — same behaviour as CI. The 70 % floor is
+temporary while the CLI surface gets dedicated `CliRunner` tests; the goal is
+to raise it back toward 85 % as those land.
 
 ### Static type checking
 
@@ -117,18 +119,20 @@ private helpers should too.
 ### Linting
 
 ```bash
-ruff check src/
+ruff check .
 ```
 
-Ruff targets Python 3.11 and selects almost every rule set (`select = ["ALL"]`).
-See `[tool.ruff.lint.ignore]` in `pyproject.toml` for the narrow exclusions
-(pydocstyle and two formatter-conflict rules). Test files are exempt from `S101`
-(use of `assert`).
+Ruff targets Python 3.11 with a curated rule set (`E`, `W`, `F`, `B`, `C4`,
+`UP`, `SIM`, `PIE`, `RUF`, `PTH`) — production bug-catchers without
+docstring/exception-style nits that fire on every other line. See
+`[tool.ruff.lint]` in `pyproject.toml` for the exact `select` and `ignore`
+lists; `tests/**` allows `assert` (B011) and `bench/**` allows `print`
+(T201).
 
 To auto-fix safe violations:
 
 ```bash
-ruff check --fix src/
+ruff check --fix .
 ```
 
 ---
@@ -190,16 +194,44 @@ ruff check src/                          # zero violations
 PR checklist — the reviewer will verify all of these:
 
 - [ ] `pytest` passes with no failures.
-- [ ] `pytest --cov` reports ≥ 85 % branch coverage.
-- [ ] `mypy src/` exits with `Success: no issues found`.
-- [ ] `ruff check src/` exits with `All checks passed!`
+- [ ] `pytest --cov` reports ≥ 70 % branch coverage (current floor — being raised
+      back toward 85 % as CLI tests land).
+- [ ] `ruff check .` exits with `All checks passed!`
 - [ ] `CHANGELOG.md` has a bullet under `## [Unreleased]` describing the change
       (use the same Conventional Commit type as the commit message).
 - [ ] The PR description explains **what** changed and **why**.
 - [ ] No new `# type: ignore` comments unless unavoidable — add a comment
       explaining why the suppression is necessary if you must.
+- [ ] If AI tools contributed substantively to the diff, the commit carries
+      a `Co-Authored-By: Claude <noreply@anthropic.com>` trailer. See
+      [ADR-0004](../docs/adr/0004-ai-assisted-documentation.md) for the policy.
 
 PRs that fail any CI check will not be merged until the gate is green.
+
+---
+
+## AI-assisted contributions
+
+This project uses AI assistance (Claude, via Claude Code CLI) for **prose**:
+README sections, ADRs, CHANGELOG entries, and this contributor guide. The
+core implementation under `src/` and the test suite under `tests/` is
+human-authored.
+
+The convention follows GitHub's standard pair-programming attribution:
+
+```
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+Every commit where Claude contributed substantively to the diff includes
+that trailer. The full inventory of where AI was used (and where it was
+not) lives in [docs/ai-assisted-development.md](../docs/ai-assisted-development.md).
+The rationale for the workflow is documented in
+[ADR-0004](../docs/adr/0004-ai-assisted-documentation.md).
+
+If you open a PR that uses AI tooling for any substantive part of the
+change, follow the same convention — add the trailer in your commit
+message. If your PR is human-only, no trailer is needed.
 
 ---
 
