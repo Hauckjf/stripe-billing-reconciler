@@ -19,7 +19,7 @@ def build_detail(
     charge: StripeCharge | None,
     order: LocalOrder | None,
 ) -> str:
-    ...
+    """Render the human-readable detail string for a given discrepancy kind."""
     if kind is DiscrepancyKind.AMOUNT_MISMATCH:
         assert charge is not None
         assert order is not None

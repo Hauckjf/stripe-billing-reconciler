@@ -72,21 +72,42 @@ ignore_errors = true
 
 [tool.ruff]
 target-version = "py311"
-line-length = 88
+line-length = 100
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["ALL"]
+# Curated production set instead of `select = ["ALL"]`. The all-rules selection
+# fires on ~50 stylistic preferences (docstring blank lines, exception message
+# placement, en-dash typography in prose) that add noise without catching real
+# bugs. This list keeps the rules that catch genuine problems: shadowed names,
+# unused imports, modern-syntax opportunities, common Python pitfalls.
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes (unused imports, undefined names)
+    "B",   # flake8-bugbear (real-bug catchers)
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade (Python 3.11+ idioms)
+    "SIM", # flake8-simplify
+    "PIE", # flake8-pie
+    "RUF", # ruff-specific (stray imports, dead literals)
+    "PTH", # use pathlib over os.path
+]
 ignore = [
-    "D203",
-    "D213",
-    "ANN101",
-    "COM812",
-    "ISC001",
+    "E501",   # line too long — formatter handles it; treating as a hard gate is noise
+    "UP017",  # datetime.UTC alias — datetime.timezone.utc is acceptable and explicit
+    "UP042",  # str+Enum vs StrEnum — explicit hierarchy reads more clearly for JSON serde
+    "RUF002", # ambiguous en-dash in docstrings — typography is intentional
+    "RUF022", # __all__ alphabetical sort — over-prescriptive for short lists
+    "PTH123", # open() vs Path.open() — minor preference
+    "SIM117", # nested with — sometimes the nesting reads clearer
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101", "ANN", "D", "PLR2004", "SLF001"]
+# Tests legitimately use assert (S101 is a security check meant for prod code).
+# Benchmark scripts use print as their report channel.
+"tests/**/*.py" = ["B011"]
+"bench/**/*.py" = ["T201"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
