@@ -194,6 +194,12 @@ stripe-billing-reconciler/
 - [ADR-0001](docs/adr/0001-sqlite-for-local-orders-store.md) — SQLite for the local orders store
 - [ADR-0002](docs/adr/0002-cursor-based-pagination.md) — cursor-based pagination over Stripe list endpoints
 - [ADR-0003](docs/adr/0003-cli-and-data-model-choices.md) — CLI framework (Click) and data-model library (Pydantic v2)
+- [ADR-0004](docs/adr/0004-ai-assisted-documentation.md) — AI-assisted documentation workflow
+
+> This repo uses AI assistance (Claude) for documentation drafting. The full
+> inventory of where AI was and was not used lives in
+> [docs/ai-assisted-development.md](docs/ai-assisted-development.md) — implementation
+> code under `src/` is human-authored.
 
 ## Performance
 
