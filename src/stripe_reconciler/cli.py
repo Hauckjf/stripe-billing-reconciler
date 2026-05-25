@@ -193,3 +193,12 @@ def reconcile(
 
     if discrepancies:
         sys.exit(1)
+
+
+def main() -> None:
+    """Console-script entry point declared in pyproject.toml.
+
+    Resolves to ``stripe-reconcile`` after ``pip install``; invokes the Click
+    group, which dispatches to ``reconcile`` (or any future subcommand).
+    """
+    cli()

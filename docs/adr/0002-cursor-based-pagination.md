@@ -6,59 +6,110 @@ Accepted — 2026-05-20.
 
 ## Context
 
-The reconciler must iterate over every Stripe `Charge` and subscription `Invoice` within a configurable date range. Stripe's List APIs return at most 100 objects per request. A production Stripe account accumulates millions of charges over time; a mid-size SaaS platform processing 50 000 transactions per month will have 600 000 charge objects after just one year.
+The reconciler must iterate over every Stripe `Charge` and every relevant
+subscription event (`invoice.payment_succeeded`, `charge.succeeded`) within a
+configurable date range. Stripe's List APIs return at most 100 objects per
+request. A production Stripe account can accumulate hundreds of thousands of
+charges in a year, so iteration strategy is not academic.
 
 Three retrieval strategies were considered:
 
 ### Option A — Fetch all records into memory
 
-Issue a single unbounded query, accumulate every page in a Python list, then iterate. This is workable for toy datasets but fails in production: 1 000 000 charges × ~400 bytes per object = ~400 MB of in-process RAM before any reconciliation logic runs. It also forces the caller to handle pagination internally anyway, since the Stripe SDK still pages under the hood.
+Issue a single unbounded query, accumulate every page in a Python list, then
+iterate. Works for toy datasets and fails at scale: 1 000 000 charges ×
+~400 bytes per object ≈ 400 MB of RAM before any reconciliation logic runs.
+Also wasteful — if the caller only cares about the first divergence, it
+should not require fetching the entire history.
 
 ### Option B — Offset pagination
 
-Represent page position as a numeric offset (`offset=N`, `limit=100`). Some REST APIs support this. Stripe does **not**: its list endpoints do not expose an `offset` parameter. More fundamentally, offset pagination on a large dataset is O(n) on the database server: to return page 10 000, the server must scan and discard the first 999 900 rows on every request. This compounds to serious performance degradation and increased risk of timeout on deep pages.
+Represent page position as a numeric offset (`offset=N`, `limit=100`). Stripe
+does **not** expose an `offset` parameter on its list endpoints, so this
+option is moot for Stripe specifically. Even if it did:
 
-### Option C — Cursor-based pagination (`starting_after` / `ending_before`)
+- Offset pagination reindexes the result set on each request. A charge
+  created between page 1 and page 2 shifts every subsequent page, causing
+  records to be skipped or visited twice.
+- The cost of `OFFSET N` on the server scales linearly with N, which becomes
+  a real problem on deep pages.
 
-Stripe exposes a stable object ID as the cursor. The first request returns a page of up to 100 objects and a boolean `has_more`. If `has_more` is `true`, the caller passes the ID of the last object in the current page as `starting_after` in the next request. This continues until `has_more` is `false`.
+### Option C — Cursor-based pagination (`starting_after`)
 
-Stripe sorts all list responses by `created` in descending order by default. The ID-based cursor is tied to that sort order, making each page boundary deterministic and stable across requests.
+Stripe exposes the last-returned object's ID as the cursor. The first request
+returns up to 100 objects and a boolean `has_more`. If `has_more` is `True`,
+the caller passes the ID of the last object as `starting_after` on the next
+request, until `has_more` is `False`.
+
+The cursor is anchored to a stable internal sort key, so concurrent inserts
+do not shift already-visited pages.
 
 ## Decision
 
-Use **cursor-based pagination** (`starting_after=last_id`, `limit=100`) as the sole iteration strategy over all Stripe list endpoints in this tool.
-
-The loop contract is:
+Use **cursor-based pagination** as the sole iteration strategy. The pattern
+is encapsulated in three fetcher modules (`fetchers/charges.py`,
+`fetchers/events.py`, `fetchers/subscriptions.py`), each implemented as a
+Python generator that yields domain objects lazily:
 
 ```python
-params = {"limit": 100, "created": {"gte": from_ts, "lte": to_ts}}
-while True:
-    page = stripe.Charge.list(**params)
-    for charge in page.auto_paging_iter():  # SDK handles starting_after internally
-        yield charge
-    if not page.has_more:
-        break
-    params["starting_after"] = page.data[-1].id
+def fetch_all_charges(
+    client: StripeClient,
+    created_gte: datetime | None,
+    created_lte: datetime | None,
+    page_size: int,
+) -> Iterator[StripeCharge]:
+    cursor: str | None = None
+    while True:
+        page = client.list_charges(
+            starting_after=cursor,
+            limit=page_size,
+            created_gte=int(created_gte.timestamp()) if created_gte else None,
+            created_lte=int(created_lte.timestamp()) if created_lte else None,
+        )
+        for raw in page.data:
+            yield StripeCharge(...)
+        if not page.has_more:
+            break
+        cursor = page.data[-1].id
 ```
 
-`limit=100` is set explicitly because it is the maximum value Stripe accepts for any list endpoint. Omitting it defaults to `limit=10`, which would increase API call count by 10× and waste roughly 90 % of available throughput quota.
+The generator pattern means the caller controls iteration. Memory stays
+constant regardless of how many charges are reconciled — the full result set
+is never buffered in process memory.
 
-The tool persists the last-processed cursor (the charge ID) in a SQLite checkpoint table after each successfully processed page. An interrupted run resumes by reading this cursor and passing it as `starting_after`, skipping all previously processed objects without re-fetching them.
+`page_size` is exposed as configuration (`stripe_page_size`, default 100,
+constrained `ge=1, le=100` via Pydantic) rather than hard-coded, so a smaller
+value can be used for low-volume testing without changing code.
 
 Reference: [Stripe API — Pagination](https://stripe.com/docs/api/pagination)
 
 ## Consequences
 
-**Positive**
+### Positive
 
-- **No duplicate pages.** Because the cursor is an opaque object ID tied to Stripe's internal sort index, advancing the cursor always yields the next unseen page. Contrast with offset pagination where a new insert at page 1 would shift every subsequent page, causing objects to be visited twice or skipped.
-- **Resilient to concurrent inserts.** New charges created while the reconciler is running appear only on pages not yet fetched (they land at the head of the descending-`created` list). Pages already consumed remain unaffected.
-- **Deterministic ordering.** Stripe guarantees descending `created` order for all list endpoints. Combined with the stable ID cursor, each run over the same date range visits objects in the same sequence, which simplifies debugging and audit comparison between runs.
-- **Checkpoint-resumable.** Persisting `last_cursor` in SQLite after each page means a crashed or rate-limited run resumes from the last committed page rather than restarting from scratch. This is essential for accounts with millions of charges where a full scan takes minutes.
-- **Rate-limit budget efficiency.** `limit=100` minimises the number of API requests needed to cover a date range, leaving more of the 100 req/s Stripe budget for the token-bucket throttler to allocate to retries and metadata lookups.
+- **No silently-dropped records.** Because the cursor is an object ID tied
+  to Stripe's internal sort, advancing the cursor always yields the next
+  unseen page even when new charges arrive between fetches (concurrent
+  inserts land on pages not yet fetched).
+- **Constant memory.** Generator-based iteration means the reconciler can
+  process accounts with millions of charges without loading them all into
+  memory.
+- **Same fetcher shape across endpoints.** Charges, events, and subscriptions
+  all use the identical `while has_more` loop. The pattern is easy to
+  recognize and verify across all three modules.
 
-**Negative / Trade-offs**
+### Negative / Trade-offs
 
-- **Cannot seek to an arbitrary position by index.** If a specific charge must be re-examined, the caller must either store its ID directly or scan from the beginning. In practice the checkpoint table stores individual charge IDs for matched/unmatched records, so point-lookup is always by ID, never by offset.
-- **Descending order requires reversing if ascending output is desired.** The reconciler collects all results then sorts by `created ASC` before writing the JSON report. This adds an in-memory sort step, but since the report is bounded by the requested date range (not the full account history), the memory cost is acceptable.
-- **SDK wraps cursor details.** `stripe.Charge.list().auto_paging_iter()` handles `starting_after` automatically. The checkpoint integration must tap into the raw page objects rather than the iterator to capture the cursor ID, which adds a small amount of SDK-coupling. This is documented in the fetcher module.
+- **No resume on interruption.** This reconciler is intentionally stateless —
+  if a run is killed mid-iteration, the next invocation starts from the
+  beginning. Reconciliation runs are read-only (no destructive writes to
+  Stripe), so re-fetching is safe and well-understood. A future variant
+  could persist the cursor between runs, but the additional state machinery
+  is not justified by the current single-CLI-invocation use case.
+- **Cannot seek to an arbitrary position.** If a specific charge must be
+  re-examined, the caller must either look it up by ID via the Stripe API
+  directly, or scan from the beginning of the date window.
+- **Stripe SDK pages internally too.** Calling `stripe.Charge.list()` with
+  `auto_paging_iter()` would page automatically without explicit cursor
+  management. We chose the explicit loop to keep the fetcher modules
+  transparent and unit-testable without mocking the SDK iterator helper.

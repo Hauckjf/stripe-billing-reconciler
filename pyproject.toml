@@ -47,7 +47,7 @@ dev = [
 ]
 
 [project.scripts]
-stripe-reconciler = "stripe_reconciler.cli:main"
+stripe-reconcile = "stripe_reconciler.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Hauckjf/stripe-billing-reconciler"

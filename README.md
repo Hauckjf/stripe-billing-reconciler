@@ -189,6 +189,12 @@ stripe-billing-reconciler/
 - `ORDER_NOT_IN_STRIPE` — local order referencing a charge Stripe did not return
 - `DUPLICATE_CHARGE_ID` — the same charge ID appeared more than once in the input stream
 
+**Key design decisions** are documented in `docs/adr/`:
+
+- [ADR-0001](docs/adr/0001-sqlite-for-local-orders-store.md) — SQLite for the local orders store
+- [ADR-0002](docs/adr/0002-cursor-based-pagination.md) — cursor-based pagination over Stripe list endpoints
+- [ADR-0003](docs/adr/0003-cli-and-data-model-choices.md) — CLI framework (Click) and data-model library (Pydantic v2)
+
 ## Performance
 
 End-to-end wall-time benchmarks measured with `timeit` (5 iterations, median
